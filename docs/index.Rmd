@@ -1,0 +1,308 @@
+---
+title: "Northwinds Data Analysis"
+author: "Ayesha Afzaal"
+date: "2024-01-21"
+output: html_document
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#load necessary libraries
+library(tidyverse)
+library(zoo)
+library(ggplot2)
+library(readr)
+library(knitr)
+library(plotly)
+
+# loading the Northwind dataset
+setwd("C:/Users/dell/Desktop/IEC")
+orders <- read_csv("Northwind/orders.csv")
+orderdetails <- read_csv("Northwind/orderdetails.csv")
+products <- read_csv("Northwind/products.csv")
+suppliers <- read_csv("Northwind/suppliers.csv")
+employees <- read_csv("Northwind/employees.csv")
+customers <- read_csv("Northwind/customers.csv")
+
+```
+
+# Top Selling Product
+```{r, message=FALSE, warning=FALSE}                        
+# Calculate revenue for each product
+product_revenue <- orderdetails |>
+  inner_join(products, by = "ProductID") |>
+  mutate(Revenue = orderdetails$UnitPrice * orderdetails$Quantity * 
+           (1 - orderdetails$Discount))
+
+# Identify the top N products by revenue
+top_products <- product_revenue |>
+  group_by(ProductName) |>
+  summarise(TotalRevenue = sum(Revenue)) |>
+  arrange(desc(TotalRevenue)) |>
+  head(30)
+
+# Display the Top Selling Products using DT::datatable
+DT::datatable(
+  top_products,
+  caption = "Top Selling Products",
+  options = list(
+    lengthMenu = c(5, 10),
+    pageLength = 5,
+    searching = TRUE,
+    ordering = TRUE
+  ),
+  style = "bootstrap",
+  class = "table table-bordered table-hover"
+)
+
+
+```
+
+***
+
+# Employee-wise Sales Comparison Using Bar Plot              
+```{r, message=FALSE, warning=FALSE}
+# Join Employees with Orders and OrderDetails
+joined_data <- inner_join(employees, orders, by = "EmployeeID") |>
+  inner_join(orderdetails, by = "OrderID")
+
+# Calculate total sales per employee
+employee_sales <- joined_data |>
+  group_by(EmployeeID, FirstName, LastName) |>
+  summarise(TotalSales = sum(UnitPrice * Quantity * (1 - Discount)))
+
+# Create a bar plot for employee-wise sales comparison
+ggplot(employee_sales, aes(x = paste(FirstName, LastName), y = TotalSales, fill = paste(FirstName, LastName))) +
+  geom_bar(stat = "identity") +
+  labs(title = "Employee-wise Sales Comparison", x = "Employee", y = "Total Sales", fill = "Employee Name") +
+  scale_fill_manual(values = rainbow(nrow(employee_sales)), name = "Employee Name") +  # Customize the legend label
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+***
+
+# Supplier Contribution                            
+```{r, message=FALSE, warning=FALSE} 
+# Join orderdetails with products
+joined_data <- orderdetails |>
+  inner_join(products, by = "ProductID") |>
+  inner_join(suppliers, by = "SupplierID")
+
+# Calculate Supplier Revenue
+supplier_revenue <- joined_data |>
+  mutate(SupplierRevenue = orderdetails$UnitPrice * orderdetails$Quantity * 
+           (1 - orderdetails$Discount))
+
+# Group by SupplierName and calculate TotalSupplierRevenue
+supplier_contribution <- supplier_revenue |>
+  group_by(SupplierID, CompanyName) |>
+  summarise(TotalSupplierRevenue = sum(SupplierRevenue))|>
+  arrange(desc(TotalSupplierRevenue)) |>
+  head(30)
+
+
+# Display the Supplier Contribution using DT::datatable
+DT::datatable(
+  supplier_contribution,
+  caption = "Supplier Contribution",
+  options = list(
+    lengthMenu = c(5, 10),
+    pageLength = 10,
+    searching = TRUE,
+    ordering = TRUE
+  ),
+  style = "bootstrap",
+  class = "table table-bordered table-hover"
+)
+
+```
+
+***
+
+# Order Date Analysis
+```{r, message=FALSE, warning=FALSE}
+# Convert OrderDate to a Date object
+orders$OrderDate <- as.Date(orders$OrderDate, format = "%m/%d/%Y")
+
+# Extract and analyze year, month, and day
+orders$Year <- format(orders$OrderDate, "%Y")
+orders$Month <- format(orders$OrderDate, "%m")
+orders$Day <- format(orders$OrderDate, "%d")
+
+# Analysis by Year
+orders_by_year <- orders |>
+  group_by(Year) %>%
+  summarise(TotalOrders = n())
+
+# Analysis by Month
+orders_by_month <- orders |>
+  group_by(Month) %>%
+  summarise(TotalOrders = n())
+
+# Analysis by Day
+orders_by_day <- orders |>
+  group_by(Day) |>
+  summarise(TotalOrders = n())
+
+# Visualize the results
+knitr::kable(orders_by_year, caption = "orders_by_year")
+
+# Display the results using DT::datatable
+DT::datatable(
+  orders_by_month,
+  caption = "Orders by Month",
+  options = list(
+    lengthMenu = c(5, 10),
+    pageLength = 5,
+    searching = TRUE,
+    ordering = TRUE
+  ),
+  style = "bootstrap",
+  class = "table table-bordered table-hover"
+)
+
+DT::datatable(
+  orders_by_day,
+  caption = "Orders by Day",
+  options = list(
+    lengthMenu = c(5, 10),
+    pageLength = 5,
+    searching = TRUE,
+    ordering = TRUE
+  ),
+  style = "bootstrap",
+  class = "table table-bordered table-hover"
+)
+```
+
+***
+
+# Analyzing Monthly Trends: Rolling Average of Freight Costs
+```{r, message=FALSE, warning=FALSE}
+
+orders$OrderDate <- as.Date(orders$OrderDate)
+
+# Function to calculate rolling average
+calculate_rolling_average <- function(data, column, window_size) {
+  data |>
+    arrange(OrderDate) |>
+    mutate(RollingAvg = zoo::rollapply(column, width = window_size, FUN = mean, align = "right", fill = NA))
+}
+
+# Calculate rolling average for Freight column with a window size of 3
+orders <- calculate_rolling_average(orders, column = orders$Freight, window_size = 3)
+
+# Plotting the trend using a rolling window on a monthly basis
+plot_ly(orders, x = ~OrderDate, y = ~RollingAvg, type = 'scatter', mode = 'lines+markers', line = list(color = 'blue'), marker = list(color = 'red')) |>
+  layout(title = "Trend of Rolling Average Freight Costs Over Time",
+         xaxis = list(title = "Order Date"),
+         yaxis = list(title = "Rolling Average Freight Cost"))
+
+# Plotting time series plot
+plot_ly(orders, x = ~OrderDate, y = ~Freight, type = 'scatter', mode = 'lines+markers', line = list(color = 'green'), marker = list(color = 'orange')) |>
+  layout(title = "Time Series Plot of Freight Costs",
+         xaxis = list(title = "Order Date"),
+         yaxis = list(title = "Freight Cost"))
+
+# Plotting boxplot to visualize monthly variation with plotly
+plot_ly(data = orders, x = ~as.character(format(OrderDate, "%Y-%m")), y = ~Freight, type = 'box') |>
+  layout(title = "Monthly Boxplot of Freight Costs",
+         xaxis = list(title = "Month", tickangle = 45, categoryorder = "array", categoryarray = unique(as.character(format(orders$OrderDate, "%Y-%m")))),
+         yaxis = list(title = "Freight Cost"))
+```
+
+***
+
+# Customer Distribution by Region             
+```{r, message=FALSE, warning=FALSE}
+customers |>
+  group_by(Region) |>
+  summarise(NumCustomers = n()) |>
+  plot_ly(labels = ~Region, values = ~NumCustomers, type = 'pie') |>
+  layout(title = "Customer Distribution by Region")
+```
+
+***
+
+# Analyzing Trends Over Time: Rolling Averages of Order Quantity by Category
+```{r, message=FALSE, warning=FALSE}
+# Use left_join for merging tables
+merged_data <- left_join(orders, orderdetails, by = "OrderID") |>
+  left_join(products, by = "ProductID")
+
+# Function to calculate rolling average
+calculate_rolling_average <- function(data, window_size) {
+  data %>%
+    arrange(OrderDate) |>
+    group_by(CategoryID) |>
+    mutate(RollingAverage = zoo::rollmeanr(Quantity, k = window_size, fill = NA)) |>
+    ungroup()
+}
+
+# Set the rolling window size (e.g., 30 days for a month)
+window_size <- 30
+
+# Calculate rolling average
+result <- calculate_rolling_average(merged_data, window_size)
+
+# Plot the rolling average using Plotly with increased width
+rolling_average_plot <- result |>
+  plot_ly(x = ~OrderDate, y = ~RollingAverage, color = ~as.factor(CategoryID), type = 'scatter', mode = 'lines') |>
+  layout(title = "Rolling Average Order Quantity Over Time by Category",
+         xaxis = list(title = "Order Date"),
+         yaxis = list(title = "Rolling Average Quantity"),
+         showlegend = TRUE,
+         width = 800)  # Adjust the width as needed
+
+# Display the Plotly plot
+rolling_average_plot
+```
+
+***
+
+# Customer-wise Orders and Shipments
+```{r, message=FALSE, warning=FALSE}
+# Full join Customers with Orders
+full_joined_customers_orders <- full_join(customers, orders, by = "CustomerID")
+
+# Count the number of orders and shipments for each customer
+customer_orders_shipments <- full_joined_customers_orders |>
+  group_by(CustomerID, CompanyName) |>
+  summarise(OrdersCount = n(), ShipmentsCount = sum(!is.na(ShippedDate)))
+
+# Select the top 10 customers based on the number of orders
+top_customers_orders <- customer_orders_shipments |>
+  arrange(desc(OrdersCount)) |>
+  head(10)
+
+# Display the Supplier Contribution
+knitr::kable(top_customers_orders, caption = "Customer Orders Shipments")
+```
+
+***
+
+# Analyzing Monthly Trends: Interactive Rolling Average for Freight Costs
+```{r, message=FALSE, warning=FALSE}
+# Make sure 'OrderDate' is of type Date
+orders$OrderDate <- as.Date(orders$OrderDate)
+
+# Function to calculate rolling average
+calculate_rolling_average <- function(data, column, window_size) {
+  data |>
+    arrange(OrderDate) |>
+    mutate(RollingAvg = zoo::rollapply(column, width = window_size, FUN = mean, align = "right", fill = NA)) |>
+    select(OrderDate, RollingAvg)
+}
+
+# Calculate rolling average for Freight column with a window size of 30
+rolling_avg_table <- calculate_rolling_average(orders, column = orders$Freight, window_size = 3)
+
+plot_ly() |>
+  add_lines(data = rolling_avg_table, x = ~OrderDate, y = ~RollingAvg, type = 'scatter', mode = 'lines', name = 'Rolling Avg') |>
+  add_lines(data = orders, x = ~OrderDate, y = ~Freight, type = 'scatter', mode = 'lines', name = 'Freight Cost') |>
+  layout(title = "Interactive Time Series Plot with Rolling Average",
+         xaxis = list(title = "Order Date"),
+         yaxis = list(title = "Freight Cost"))
+```
+
+***
